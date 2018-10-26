@@ -1,0 +1,253 @@
+#include "Storage.hpp"
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include "Path.hpp"
+using namespace std;
+
+std::shared_ptr<Storage> Storage::m_instance = nullptr;
+
+Storage::Storage() {
+  m_dirty = false;
+  readFromFile();
+}
+
+bool Storage::readFromFile(void) {
+  ifstream fcin(Path::userPath);
+  if(!fcin.is_open())
+   return false;
+  int count = 1;
+  bool flag = false;
+  char ch;
+  User user;
+  std::string str;
+  while(!fcin.eof()) {
+    fcin.get(ch);
+    if(ch == '"') {
+      if(!flag) {
+       flag = true;
+       str = "";
+      }
+      else {
+        switch(count) {
+          case 1:
+            user.setName(str);
+            count++;
+            flag = false;
+            break;
+          case 2:
+            user.setPassword(str);
+            count++;
+            flag = false;
+            break;
+          case 3:
+            user.setEmail(str);
+            count++;
+            flag = false;
+            break;
+          case 4:
+            user.setPhone(str);
+            m_userList.push_back(user);
+            count = 1;
+            flag = false;
+            break;
+        }
+      }
+    }
+    else if(ch != ',' && ch != '\n') 
+      str += ch;
+  }
+  fcin.close();
+  fcin.open(Path::meetingPath);
+  if(!fcin.is_open())
+   return false;
+  count = 1;
+  flag = false;
+  Meeting meeting;
+  vector<string> participator;
+  while(!fcin.eof()) {
+    fcin.get(ch);
+    if(ch == '"') {
+      if(!flag) {
+       flag = true;
+       str = "";
+      }
+      else {
+        switch(count) {
+          case 1:
+            meeting.setSponsor(str);
+            count++;
+            flag = false;
+            break;
+          case 2:
+            if(str.find('&') != -1) {
+              while(str.find('&') != -1) {
+                string s = str.substr(0, str.find('&'));
+                participator.push_back(s);
+                str.erase(0, s.size() + 1);
+              }
+              participator.push_back(str);
+            }
+            else {
+              participator.push_back(str);
+            }
+            meeting.setParticipator(participator);
+            participator.clear();
+            count++;
+            flag = false;
+            break;
+          case 3:
+            meeting.setStartDate(str);
+            count++;
+            flag = false;
+            break;
+          case 4:
+            meeting.setEndDate(str);
+            count++;
+            flag = false;
+            break;
+          case 5:
+            meeting.setTitle(str);
+            m_meetingList.push_back(meeting);
+            count = 1;
+            flag = false;
+            break;
+        }
+      }
+    }
+    else if(ch != ',' && ch != '\n') 
+      str += ch;
+  }
+  fcin.close();
+  return true;
+}
+
+bool Storage::writeToFile(void) {
+  ofstream fcout(Path::userPath);
+  if(!fcout.is_open())
+   return false;
+  for(auto it = m_userList.begin(); it != m_userList.end(); it++) {
+    fcout << "\"" << it -> getName() << "\","
+           << "\"" << it -> getPassword() << "\","
+            << "\"" << it -> getEmail() << "\","
+             << "\"" << it -> getPhone() << "\"" << endl;
+  }
+  fcout.close();
+  fcout.open(Path::meetingPath);
+  if(!fcout.is_open())
+   return false;
+  for(auto it = m_meetingList.begin(); it != m_meetingList.end(); it++) {
+    fcout << "\"" << it -> getSponsor() << "\"," << "\"";
+    for(int i = 0; i < it -> getParticipator().size(); i++) {
+      if(i == 0) 
+        fcout << it -> getParticipator()[i];
+      else
+        fcout << "&" << it -> getParticipator()[i];
+      
+    }
+    fcout << "\"," << "\"" << Date::dateToString(it -> getStartDate()) << "\","
+           << "\"" << Date::dateToString(it -> getEndDate()) << "\","
+            << "\"" << it -> getTitle() << "\"" << endl;
+  }
+  fcout.close();
+  return true;
+}
+
+bool Storage::sync(void) {
+  if(m_dirty) {
+    m_dirty = false;
+    return writeToFile();
+  }
+  return false;
+}
+
+std::shared_ptr<Storage> Storage::getInstance(void) {
+  if(m_instance == nullptr);
+    m_instance = std::shared_ptr<Storage>(new Storage);
+  return m_instance;
+}
+
+Storage::~Storage() {
+  sync();
+}
+
+void Storage::createUser(const User &t_user) {
+  m_userList.push_back(t_user);
+  m_dirty = true;
+}
+
+std::list<User> Storage::queryUser(std::function<bool(const User &)> filter) const {
+  std::list<User> List;
+  for(auto it = m_userList.begin(); it != m_userList.end(); it++) {
+    if(filter(*it))
+      List.push_back(*it);
+  }
+  return List;
+}
+
+int Storage::updateUser(std::function<bool(const User &)> filter,
+                 std::function<void(User &)> switcher) {
+  int count = 0;
+  for(auto it = m_userList.begin(); it != m_userList.end(); it++) {
+    if(filter(*it)) {
+      switcher(*it);
+      count++;
+    }
+  }
+  m_dirty = true;
+  return count;
+}
+
+int Storage::deleteUser(std::function<bool(const User &)> filter) {
+  int count = 0;
+  for(auto it = m_userList.begin(); it != m_userList.end(); it++) {
+    if(filter(*it)) {
+      it = m_userList.erase(it);
+      it--;
+      count++;
+    }
+  }
+  m_dirty = true;
+  return count;
+}
+
+void Storage::createMeeting(const Meeting &t_meeting) {
+  m_meetingList.push_back(t_meeting);
+  m_dirty = true;
+}
+
+std::list<Meeting> Storage::queryMeeting(
+      std::function<bool(const Meeting &)> filter) const {
+  std::list<Meeting> List;
+  for(auto it = m_meetingList.begin(); it != m_meetingList.end(); it++) {
+    if(filter(*it))
+      List.push_back(*it);
+  }
+  return List;
+}
+
+int Storage::updateMeeting(std::function<bool(const Meeting &)> filter,
+                    std::function<void(Meeting &)> switcher) {
+  int count = 0;
+  for(auto it = m_meetingList.begin(); it != m_meetingList.end(); it++) {
+    if(filter(*it)) {
+      switcher(*it);
+      count++;
+    }
+  }
+  m_dirty = true;
+  return count;
+}
+
+int Storage::deleteMeeting(std::function<bool(const Meeting &)> filter) {
+  int count = 0;
+  for(auto it = m_meetingList.begin(); it != m_meetingList.end(); it++) {
+    if(filter(*it)) {
+      it = m_meetingList.erase(it);
+      it--;
+      count++;
+    }
+  }
+  m_dirty = true;
+  return count;
+}
